@@ -10,7 +10,7 @@ from trytond.i18n import gettext
 from trytond.model import ModelView, ModelSQL, fields
 from trytond.model.exceptions import ValidationError
 from trytond.pyson import Eval, Bool, PYSONDecoder, If
-from trytond.tools import file_open
+from trytond.tools import file_open, memoize
 from trytond.transaction import Transaction
 from trytond.wizard import Wizard, StateView, Button
 from trytond.pool import Pool
@@ -34,7 +34,7 @@ class View(ModelSQL, ModelView):
     __name__ = 'ir.ui.view'
     _rec_name = 'model'
     model = fields.Char('Model', select=True, states={
-            'required': Eval('type') != 'board',
+            'required': Eval('type').in_([None, 'tree', 'form', 'graph']),
             })
     priority = fields.Integer('Priority', required=True, select=True)
     type = fields.Selection([
@@ -70,7 +70,8 @@ class View(ModelSQL, ModelView):
     domain = fields.Char('Domain', states={
             'invisible': ~Eval('inherit'),
             }, depends=['inherit'])
-    _get_rng_cache = Cache('ir_ui_view.get_rng')
+    # AKE : Force usage of MemoryCache for non serializable data
+    _get_rng_cache = MemoryCache('ir_ui_view.get_rng')
 
     @classmethod
     def __setup__(cls):
@@ -97,6 +98,7 @@ class View(ModelSQL, ModelView):
         pass
 
     @classmethod
+    @memoize(10)
     def get_rng(cls, type_):
         key = (cls.__name__, type_)
         rng = cls._get_rng_cache.get(key)
@@ -129,7 +131,16 @@ class View(ModelSQL, ModelView):
             xml = view.arch.strip()
             if not xml:
                 continue
-            tree = etree.fromstring(xml)
+            try:
+                tree = etree.fromstring(xml)
+            except Exception:
+                # JCA : print faulty xml
+                try:
+                    import pprint
+                    pprint.pprint(xml)
+                except:
+                    print(xml)
+                raise
 
             if hasattr(etree, 'RelaxNG'):
                 validator = etree.RelaxNG(etree=cls.get_rng(view.rng_type))
@@ -149,7 +160,7 @@ class View(ModelSQL, ModelView):
             }
 
             def encode(element):
-                for attr in ('states', 'domain', 'spell'):
+                for attr in ('states', 'domain', 'spell', 'colors'):
                     if not element.get(attr):
                         continue
                     try:
