@@ -1438,6 +1438,8 @@ class ModelStorage(Model):
             to_remove = set(x for x, y in fread_accesses.items()
                     if not y and x != name)
 
+            threshold = config.getint('cache', 'field')
+
             def not_cached(item):
                 fname, field = item
                 return (fname not in self._cache.get(self.id, {})
@@ -1455,7 +1457,7 @@ class ModelStorage(Model):
             ifields = filter(to_load,
                 filter(not_cached,
                     iter(self._fields.items())))
-            ifields = islice(ifields, 0, _cache_field)
+            ifields = islice(ifields, 0, threshold)
             ffields.update(ifields)
 
         # add datetime_field

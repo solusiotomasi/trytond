@@ -10,7 +10,6 @@ from trytond.model import fields
 from trytond.model.exceptions import ValidationError
 from trytond.pyson import Eval, PYSONDecoder
 from trytond.rpc import RPC
-from trytond.tools import slugify
 from trytond.transaction import Transaction
 from trytond.pool import Pool
 
@@ -160,6 +159,10 @@ class DictSchemaMixin(object):
                 new_key['sort'] = record.selection_sorted
             elif record.type_ in ('float', 'numeric'):
                 new_key['digits'] = (16, record.digits)
+            # ABDC Inject sequence order in dict schema to allow client sorting
+            # properly using this custom sequence instead of extra data key
+            if hasattr(record, 'sequence_order'):
+                new_key['sequence_order'] = record.sequence_order
             keys.append(new_key)
         return keys
 
