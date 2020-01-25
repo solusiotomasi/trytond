@@ -17,6 +17,7 @@ from trytond import backend
 from trytond.config import config
 from trytond.transaction import Transaction
 from trytond.tools import resolve
+from trytond.cache_serializer import pack, unpack
 
 __all__ = ['BaseCache', 'Cache', 'LRUDict']
 _clear_timeout = config.getint('cache', 'clean_timeout', default=5 * 60)
@@ -310,10 +311,28 @@ class MemoryCache(BaseCache):
                     del cls._listener[dbname]
 
 
+class DefaultCacheValue:
+    pass
+
+
+_default_cache_value = DefaultCacheValue()
+
+
+class SerializableMemoryCache(MemoryCache):
+    def get(self, key, default=None):
+        result = super(SerializableMemoryCache, self).get(key,
+            _default_cache_value)
+        return default if result == _default_cache_value else unpack(result)
+
+    def set(self, key, value):
+        super(SerializableMemoryCache, self).set(key, pack(value))
+
+
 if config.get('cache', 'class'):
     Cache = resolve(config.get('cache', 'class'))
 else:
-    Cache = MemoryCache
+    # JCA : Use serializable memory cache by default to avoid cache corruption
+    Cache = SerializableMemoryCache
 
 
 class LRUDict(OrderedDict):

@@ -5,6 +5,8 @@ import configparser
 import urllib.parse
 import logging
 
+import six
+
 __all__ = ['config', 'get_hostname', 'get_port', 'split_netloc',
     'parse_listen', 'parse_uri']
 logger = logging.getLogger(__name__)
@@ -40,7 +42,12 @@ def parse_uri(uri):
 class TrytonConfigParser(configparser.ConfigParser):
 
     def __init__(self):
-        super().__init__(interpolation=None)
+		super().__init__(interpolation=None)
+        # AKE
+        if six.PY2:
+            configparser.RawConfigParser.__init__(self)
+        else:
+            configparser.RawConfigParser.__init__(self, strict=False)
         self.add_section('web')
         self.set('web', 'listen', 'localhost:8000')
         self.set('web', 'root', os.path.join(os.path.expanduser('~'), 'www'))
@@ -80,6 +87,11 @@ class TrytonConfigParser(configparser.ConfigParser):
         self.set('password', 'length', '8')
         self.set('password', 'entropy', '0.75')
         self.set('password', 'reset_timeout', str(24 * 60 * 60))
+
+        # AKE: sentry config from env vars
+        self.add_section('sentry')
+        self.set('sentry', 'dsn', os.environ.get('TRYTOND_SENTRY_DSN', None))
+
         self.add_section('bus')
         self.set('bus', 'allow_subscribe', 'False')
         self.set('bus', 'long_polling_timeout', str(5 * 60))

@@ -54,6 +54,8 @@ class Pool(object):
     _pool = {}
     test = False
     _instances = {}
+    _init_hooks = {}
+    _post_init_calls = {}
 
     def __new__(cls, database_name=None):
         if database_name is None:
@@ -93,6 +95,12 @@ class Pool(object):
     def register_mixin(mixin, classinfo, module):
         Pool.classes_mixin[module].append((classinfo, mixin))
 
+    @staticmethod
+    def register_post_init_hooks(*hooks, **kwargs):
+        if kwargs['module'] not in Pool._init_hooks:
+            Pool._init_hooks[kwargs['module']] = []
+        Pool._init_hooks[kwargs['module']] += hooks
+
     @classmethod
     def start(cls):
         '''
@@ -101,6 +109,7 @@ class Pool(object):
         with cls._lock:
             for classes in Pool.classes.values():
                 classes.clear()
+            cls._init_hooks = {}
             register_classes()
             cls._started = True
 
@@ -146,7 +155,11 @@ class Pool(object):
         Set update to proceed to update
         lang is a list of language code to be updated
         '''
+        # AKE: inter-workers communication
+        from trytond import iwc
         with self._lock:
+            # AKE: inter-workers communication
+            iwc.start()
             if not self._started:
                 self.start()
         with self._locks[self.database_name]:
@@ -158,10 +171,18 @@ class Pool(object):
             # Clean the _pool before loading modules
             for type in self.classes.keys():
                 self._pool[self.database_name][type] = {}
+            self._post_init_calls[self.database_name] = []
             restart = not load_modules(self.database_name, self, update=update,
                     lang=lang, activatedeps=activatedeps)
             if restart:
                 self.init()
+            # AKE: inter-workers communication
+            if update:
+                iwc.broadcast_init_pool(self.database_name)
+
+    def post_init(self, update):
+        for hook in self._post_init_calls[self.database_name]:
+            hook(self, update)
 
     def get(self, name, type='model'):
         '''
@@ -224,6 +245,8 @@ class Pool(object):
                 assert issubclass(cls, PoolBase), cls
                 self.add(cls, type=type_)
                 classes[type_].append(cls)
+        self._post_init_calls[self.database_name] += self._init_hooks.get(
+            module, [])
         return classes
 
     def setup(self, classes=None):
