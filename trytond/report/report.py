@@ -1,6 +1,8 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
+import time
 import datetime
+import logging
 import os
 import logging
 import subprocess
@@ -34,11 +36,14 @@ from genshi.filters import Translator
 from trytond.i18n import gettext
 from trytond.pool import Pool, PoolBase
 from trytond.transaction import Transaction
+from trytond.config import config
 from trytond.url import URLMixin
 from trytond.rpc import RPC
 from trytond.exceptions import UserError
 
 logger = logging.getLogger(__name__)
+
+import requests
 
 MIMETYPES = {
     'odt': 'application/vnd.oasis.opendocument.text',
@@ -55,6 +60,7 @@ FORMAT2EXT = {
     'doc95': 'doc',
     'docbook': 'xml',
     'docx7': 'docx',
+    'docx': 'docx',
     'ooxml': 'xml',
     'latex': 'ltx',
     'sdc4': 'sdc',
@@ -69,6 +75,7 @@ FORMAT2EXT = {
     'xhtml': 'html',
     'xls5': 'xls',
     'xls95': 'xls',
+    'xlsx': 'xlsx',
     }
 
 TIMEDELTA_DEFAULT_CONVERTER = {
@@ -247,6 +254,8 @@ class Report(URLMixin, PoolBase):
             def __str__(self):
                 return '%s,%s' % (Model.__name__, self.id)
 
+            def __unicode__(self):
+                return '%s,%s' % (Model.__name__, self.id)
         return [TranslateModel(id) for id in ids]
 
     @classmethod
@@ -322,37 +331,82 @@ class Report(URLMixin, PoolBase):
                 and input_format in {'html', 'xhtml'}
                 and output_format == 'pdf'):
             return output_format, weasyprint.HTML(string=data).write_pdf()
+            
+        # AKE: support printing via external api
+        if config.get('report', 'api', default=None):
+            return cls.convert_api(report, data, timeout)
+        elif config.get('report', 'unoconv', default=True):
+            return cls.convert_unoconv(report, data, timeout)
+        else:
+            raise NotImplementedError
+
+    @classmethod
+    def convert_unoconv(cls, report, data, timeout):
+        # AKE: support printing via external api
+        input_format = report.template_extension
+        output_format = report.extension or report.template_extension
 
         if output_format in MIMETYPES:
             return output_format, data
 
-        dtemp = tempfile.mkdtemp(prefix='trytond_')
-        path = os.path.join(
-            dtemp, report.report_name + os.extsep + input_format)
+        fd, path = tempfile.mkstemp(suffix=(os.extsep + input_format),
+            prefix='trytond_')
         oext = FORMAT2EXT.get(output_format, output_format)
-        mode = 'w+' if isinstance(data, str) else 'wb+'
-        with open(path, mode) as fp:
+        output = None
+        dtemp = os.path.dirname(path)
+        with os.fdopen(fd, 'wb+') as fp:
             fp.write(data)
         try:
             cmd = ['soffice',
                 '--headless', '--nolockcheck', '--nodefault', '--norestore',
                 '--convert-to', oext, '--outdir', dtemp, path]
+            logger = logging.getLogger(__name__)
             output = os.path.splitext(path)[0] + os.extsep + oext
             subprocess.check_call(cmd, timeout=timeout)
+            # ABDC: Please don't judge me... Soffice makes me do this because
+            # its returns before file creation.
+            nb_retry = 0
+            while nb_retry < 10:
+                nb_retry += 1
+                if os.path.exists(output):
+                    break
+                time.sleep(0.2)
             if os.path.exists(output):
                 with open(output, 'rb') as fp:
                     return oext, fp.read()
             else:
                 logger.error(
-                    'fail to convert %s to %s', report.report_name, oext)
+                    'fail to convert file %s to %s' % (path, output))
                 return input_format, data
+            with open(output, 'rb') as fp:
+                return oext, fp.read()
         finally:
             try:
                 os.remove(path)
-                os.remove(output)
+                if output:
+                    os.remove(output)
                 os.rmdir(dtemp)
             except OSError:
                 pass
+
+    @classmethod
+    def convert_api(cls, report, data, timeout):
+        # AKE: support printing via external api
+        input_format = report.template_extension
+        output_format = report.extension or report.template_extension
+
+        if output_format in MIMETYPES:
+            return output_format, data
+
+        oext = FORMAT2EXT.get(output_format, output_format)
+        url_tpl = config.get('report', 'api')
+        url = url_tpl.format(oext=oext)
+        files = {'file': ('doc.' + input_format, data)}
+        r = requests.post(url, files=files, timeout=timeout)
+        if r.status_code < 300:
+            return oext, r.content
+        else:
+            raise Exception(r)
 
     @classmethod
     def format_date(cls, value, lang=None, format=None):
