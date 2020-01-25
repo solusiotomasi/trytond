@@ -45,7 +45,7 @@ version = get_version()
 major_version, minor_version, _ = version.split('.', 2)
 major_version = int(major_version)
 minor_version = int(minor_version)
-name = 'trytond'
+name = 'sos'
 
 download_url = 'http://downloads.tryton.org/%s.%s/' % (
     major_version, minor_version)
@@ -53,12 +53,6 @@ if minor_version % 2:
     version = '%s.%s.dev0' % (major_version, minor_version)
     download_url = 'hg+http://hg.tryton.org/%s#egg=%s-%s' % (
         name, name, version)
-local_version = []
-for build in ['CI_BUILD_NUMBER', 'CI_JOB_NUMBER', 'CI_JOB_ID']:
-    if os.environ.get(build):
-        local_version.append(os.environ[build])
-if local_version:
-    version += '+' + '.'.join(local_version)
 
 if platform.python_implementation() == 'PyPy':
     pg_require = ['psycopg2cffi >= 2.5.4']
@@ -157,6 +151,7 @@ setup(name=name,
         'html2text': ['html2text'],
         'weasyprint': ['weasyprint'],
         'coroutine': ['gevent>=1.1'],
+		'pytz': ['pytz'],
         },
     zip_safe=False,
     test_suite='trytond.tests',
