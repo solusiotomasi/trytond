@@ -1,7 +1,6 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 from collections import namedtuple
-from sql import For
 
 DatabaseIntegrityError = None
 DatabaseOperationalError = None
@@ -21,6 +20,16 @@ class DatabaseInterface(object):
 
     def __init__(self, name=''):
         self.name = name
+
+    def _kill_session_query(self, database_name):
+        raise NotImplementedError
+
+    def kill_other_sessions(self, connection, database_name):
+        '''
+        Kill all sessions using the given database name
+        '''
+        cursor = connection.cursor()
+        cursor.execute(self._kill_session_query(database_name))
 
     def connect(self):
         '''
@@ -164,10 +173,6 @@ class DatabaseInterface(object):
     def has_select_for(self):
         "Return if database supports FOR UPDATE/SHARE clause in SELECT."
         return False
-
-    def get_select_for_skip_locked(self):
-        "Return For class with skip locked"
-        return For
 
     def has_window_functions(self):
         "Return if database supports window functions."
