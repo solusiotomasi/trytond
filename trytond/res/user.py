@@ -29,6 +29,7 @@ from sql.conditionals import Coalesce, Case
 from sql.aggregate import Count
 from sql.operators import Concat
 
+import trytond.security as security
 from passlib.context import CryptContext
 
 try:
@@ -314,6 +315,11 @@ class User(DeactivableMixin, ModelSQL, ModelView):
 
     @staticmethod
     def get_sessions(users, name):
+        # AKE: manage session on redis
+        if security.config_session_redis():
+            dbname = Pool().database_name
+            return {u.id: security.redis.count_sessions(dbname, u.id)
+                for u in users}
         Session = Pool().get('ir.session')
         now = datetime.datetime.now()
         timeout = datetime.timedelta(
@@ -444,6 +450,10 @@ class User(DeactivableMixin, ModelSQL, ModelView):
         ConfigItem = pool.get('ir.module.config_wizard.item')
 
         res = {}
+        # AKE: add token information to get_preferences RPC
+        token = Transaction().context.get('token', None)
+        if token is not None:
+            res['token'] = token
         if context_only:
             fields = cls._context_fields
         else:
